@@ -47,6 +47,16 @@ tasks:
     cmds:
       - ./{{.DIST}}/goldfish
 
+  lint:
+    desc: Apply go fix, vet, and check gofmt
+    # go fix/vet compile the cgo binding, which needs C++17 (Qt6 headers).
+    env:
+      CGO_CXXFLAGS: -std=c++17
+    cmds:
+      - go fix ./...
+      - go vet ./...
+      - test -z "$(gofmt -l .)" || { echo 'gofmt needed:'; gofmt -l .; exit 1; }
+
   app:
     desc: Package a self-contained, pruned Goldfish.app bundle into dist/
     deps: [build]
