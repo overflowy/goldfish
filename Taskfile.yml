@@ -1,0 +1,81 @@
+# https://taskfile.dev
+
+version: '3'
+
+vars:
+  DIST: dist
+  BUNDLE: dist/Goldfish.app
+
+  # Plugins macdeployqt deploys that we DON'T want to ship. Removing a plugin
+  # also drops every framework it was the sole reason for bundling (handled
+  # automatically by scripts/prune-app.sh). Edit this list to taste.
+  #
+  # Kept by default: platforms/libqcocoa (required), styles/libqmacstyle,
+  # and the common raster image formats (png is built into QtGui; gif/jpeg/ico
+  # are kept via their plugins below by NOT listing them here).
+  EXCLUDE_PLUGINS: >-
+    platforminputcontexts/libqtvirtualkeyboardplugin.dylib
+    iconengines/libqsvgicon.dylib
+    imageformats/libqpdf.dylib
+    imageformats/libqwebp.dylib
+    imageformats/libqtiff.dylib
+    imageformats/libqjp2.dylib
+    imageformats/libqmng.dylib
+    imageformats/libqtga.dylib
+    imageformats/libqwbmp.dylib
+    imageformats/libqicns.dylib
+    imageformats/libqmacheif.dylib
+
+tasks:
+  default:
+    cmds:
+      - task --list
+    silent: true
+
+  build:
+    desc: Build the miqt binary into dist/
+    # Qt6 headers require C++17; miqt's cgo binding doesn't force the std.
+    env:
+      CGO_CXXFLAGS: -std=c++17
+    cmds:
+      - mkdir -p {{.DIST}}
+      - go build -o {{.DIST}}/goldfish .
+
+  run:
+    desc: Build and run the app
+    deps: [build]
+    cmds:
+      - ./{{.DIST}}/goldfish
+
+  app:
+    desc: Package a self-contained, pruned Goldfish.app bundle into dist/
+    deps: [build]
+    cmds:
+      - rm -rf {{.BUNDLE}}
+      - mkdir -p {{.BUNDLE}}/Contents/MacOS {{.BUNDLE}}/Contents/Resources
+      - cp {{.DIST}}/goldfish {{.BUNDLE}}/Contents/MacOS/goldfish
+      - cp Info.plist {{.BUNDLE}}/Contents/Info.plist
+      # Bundle the Qt frameworks/plugins so the app runs without Homebrew Qt.
+      # A module is auto-bundled when the BINARY links it (its dep is an
+      # absolute install-name path), so extending the app to use QtSvg, QtCharts,
+      # etc. deploys it automatically — no config needed here. macdeployqt also
+      # tries to add auto-discovered plugins (qsvgicon, qpdf, virtualkeyboard);
+      # on Homebrew it can't resolve their sibling-keg @rpath frameworks (these
+      # are the "Cannot resolve rpath" warnings), and EXCLUDE_PLUGINS strips
+      # them anyway. Ignore macdeployqt's exit code; it also self-signs and then
+      # edits dylibs, breaking its signature, so we re-sign after pruning.
+      - macdeployqt {{.BUNDLE}} || true
+      # Drop unwanted plugins + their now-orphaned frameworks (see EXCLUDE_PLUGINS).
+      - bash scripts/prune-app.sh {{.BUNDLE}} {{.EXCLUDE_PLUGINS}}
+      - codesign --force --deep --sign - {{.BUNDLE}}
+
+  open:
+    desc: Build and open the app bundle
+    deps: [app]
+    cmds:
+      - open {{.BUNDLE}}
+
+  clean:
+    desc: Remove the dist/ output directory
+    cmds:
+      - rm -rf {{.DIST}}
