@@ -22,5 +22,8 @@
 	<true/>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<!-- Menu-bar agent: no dock icon. The always-present overlay is the UI. -->
+	<key>LSUIElement</key>
+	<true/>
 </dict>
 </plist>
