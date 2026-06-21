@@ -34,8 +34,7 @@ type Durations struct {
 type Session struct {
 	durations Durations
 
-	phase     Phase
-	intention string
+	phase Phase
 
 	// focusDone counts completed focus blocks toward the next Long break (0..4).
 	// "Completed" means the user advanced out of focus via TakeBreak; an
@@ -58,11 +57,9 @@ func (s *Session) SetDurations(d Durations) { s.durations = d }
 
 // --- queries the overlay renders from -------------------------------------
 
-func (s *Session) Phase() Phase          { return s.phase }
-func (s *Session) Intention() string     { return s.intention }
-func (s *Session) SetIntention(t string) { s.intention = t }
-func (s *Session) Running() bool         { return s.running }
-func (s *Session) Paused() bool          { return s.paused }
+func (s *Session) Phase() Phase  { return s.phase }
+func (s *Session) Running() bool { return s.running }
+func (s *Session) Paused() bool  { return s.paused }
 
 // FocusDone is how many focus blocks are complete in the current cycle (0..4),
 // for rendering progress toward the Long break.

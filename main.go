@@ -29,12 +29,18 @@ func main() {
 	})
 	overlay.Show(cfg.WindowX, cfg.WindowY)
 
-	installTray()
+	// The menu-bar item is the primary control surface; it repaints the overlay
+	// immediately after any action.
+	tray := ui.NewTray(sess, overlay.Refresh)
 
-	// Poll the session a few times a second so the countdown, overtime flip, and
-	// one-shot chime stay live without the session having to push events.
+	// Poll the session a few times a second so the countdown, overtime flip,
+	// one-shot chime, and menu enabled-states stay live without the session
+	// having to push events.
 	ticker := qt6.NewQTimer()
-	ticker.OnTimeout(overlay.Refresh)
+	ticker.OnTimeout(func() {
+		overlay.Refresh()
+		tray.Sync()
+	})
 	ticker.Start(250)
 
 	qt6.QApplication_Exec()
@@ -46,37 +52,4 @@ func durationsFromConfig(cfg config.Config) session.Durations {
 		Break:     time.Duration(cfg.BreakMinutes) * time.Minute,
 		LongBreak: time.Duration(cfg.LongBreakMinutes) * time.Minute,
 	}
-}
-
-// installTray adds the menu-bar item whose only job is to quit the agent (the
-// overlay handles all session control). The tray reference is intentionally not
-// retained: it lives for the process lifetime via Qt's ownership.
-func installTray() {
-	tray := qt6.NewQSystemTrayIcon()
-	tray.SetIcon(trayIcon())
-	tray.SetToolTip("Goldfish")
-
-	menu := qt6.NewQMenu2()
-	quit := qt6.NewQAction2("Quit Goldfish")
-	quit.OnTriggered(qt6.QCoreApplication_Quit)
-	menu.QWidget.AddAction(quit)
-
-	tray.SetContextMenu(menu)
-	tray.Show()
-}
-
-// trayIcon paints a small filled dot at runtime so Goldfish ships no image asset.
-func trayIcon() *qt6.QIcon {
-	pm := qt6.NewQPixmap2(22, 22)
-	pm.FillWithFillColor(qt6.NewQColor6("transparent"))
-
-	p := qt6.NewQPainter()
-	p.Begin(pm.QPaintDevice)
-	p.SetRenderHint(qt6.QPainter__Antialiasing)
-	p.SetPen(qt6.NewQColor6("transparent"))
-	p.SetBrush(qt6.NewQBrush3(qt6.NewQColor6("#f5a623")))
-	p.DrawEllipse2(3, 3, 16, 16)
-	p.End()
-
-	return qt6.NewQIcon2(pm)
 }
