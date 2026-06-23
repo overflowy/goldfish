@@ -95,3 +95,6 @@ xattr -dr com.apple.quarantine /Applications/Goldfish.app
 Then open it normally. (You only need to do this once per build/download - a
 locally built bundle that you never download won't be quarantined at all.)
 
+## License
+
+MIT
