@@ -5,6 +5,7 @@ version: "3"
 vars:
   DIST: dist
   BUNDLE: dist/Goldfish.app
+  ICON: assets/icon.png
 
   # Plugins macdeployqt deploys that we DON'T want to ship. Removing a plugin
   # also drops every framework it was the sole reason for bundling (handled
@@ -58,6 +59,8 @@ tasks:
       - mkdir -p {{.BUNDLE}}/Contents/MacOS {{.BUNDLE}}/Contents/Resources
       - cp {{.DIST}}/goldfish {{.BUNDLE}}/Contents/MacOS/goldfish
       - cp Info.plist {{.BUNDLE}}/Contents/Info.plist
+      # App icon (CFBundleIconFile=Goldfish). Generated from the source PNG.
+      - bash scripts/make-icns.sh {{.ICON}} {{.BUNDLE}}/Contents/Resources/Goldfish.icns
       # Bundle the Qt frameworks/plugins so the app runs without Homebrew Qt.
       # A module is auto-bundled when the BINARY links it (its dep is an
       # absolute install-name path), so extending the app to use QtSvg, QtCharts,

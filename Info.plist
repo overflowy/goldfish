@@ -8,6 +8,8 @@
 	<string>com.goldfish.app</string>
 	<key>CFBundleName</key>
 	<string>Goldfish</string>
+	<key>CFBundleIconFile</key>
+	<string>Goldfish</string>
 	<key>CFBundleDisplayName</key>
 	<string>Goldfish</string>
 	<key>CFBundlePackageType</key>
