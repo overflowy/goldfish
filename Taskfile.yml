@@ -1,6 +1,6 @@
 # https://taskfile.dev
 
-version: '3'
+version: "3"
 
 vars:
   DIST: dist
@@ -32,32 +32,25 @@ tasks:
       - task --list
     silent: true
 
+  fix:
+    desc: Apply go fix, vet and gofmt
+    dir: .
+    env:
+      CGO_CXXFLAGS: -std=c++17
+    cmds:
+      - go fix ./...
+      - go vet ./...
+      - gofmt -w .
+
   build:
     desc: Build the miqt binary into dist/
-    # Qt6 headers require C++17; miqt's cgo binding doesn't force the std.
     env:
       CGO_CXXFLAGS: -std=c++17
     cmds:
       - mkdir -p {{.DIST}}
       - go build -o {{.DIST}}/goldfish .
 
-  run:
-    desc: Build and run the app
-    deps: [build]
-    cmds:
-      - ./{{.DIST}}/goldfish
-
-  lint:
-    desc: Apply go fix, vet, and check gofmt
-    # go fix/vet compile the cgo binding, which needs C++17 (Qt6 headers).
-    env:
-      CGO_CXXFLAGS: -std=c++17
-    cmds:
-      - go fix ./...
-      - go vet ./...
-      - test -z "$(gofmt -l .)" || { echo 'gofmt needed:'; gofmt -l .; exit 1; }
-
-  app:
+  build:app:
     desc: Package a self-contained, pruned Goldfish.app bundle into dist/
     deps: [build]
     cmds:
@@ -78,14 +71,3 @@ tasks:
       # Drop unwanted plugins + their now-orphaned frameworks (see EXCLUDE_PLUGINS).
       - bash scripts/prune-app.sh {{.BUNDLE}} {{.EXCLUDE_PLUGINS}}
       - codesign --force --deep --sign - {{.BUNDLE}}
-
-  open:
-    desc: Build and open the app bundle
-    deps: [app]
-    cmds:
-      - open {{.BUNDLE}}
-
-  clean:
-    desc: Remove the dist/ output directory
-    cmds:
-      - rm -rf {{.DIST}}

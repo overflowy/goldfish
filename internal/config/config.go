@@ -1,7 +1,3 @@
-// Package config loads and persists Goldfish's only durable state: the three
-// phase durations and the overlay's last window position. Everything else about
-// a session is present-tense and forgotten on quit (see CONTEXT.md). The file is
-// a small flat TOML document so it stays hand-editable.
 package config
 
 import (
@@ -13,19 +9,18 @@ import (
 	"strings"
 )
 
-// Config is the whole persisted document. Durations are in minutes (the unit the
-// user thinks and edits in); WindowX/WindowY are screen coordinates, with -1
-// meaning "unset — place at the default top-right corner".
 type Config struct {
 	FocusMinutes     int
 	BreakMinutes     int
 	LongBreakMinutes int
 	WindowX          int
 	WindowY          int
+	AutoStartBreaks  bool
+	AutoStartFocus   bool
 }
 
 // Default returns the opinionated classic-Pomodoro durations with an unset
-// window position.
+// window position and auto-start-breaks enabled.
 func Default() Config {
 	return Config{
 		FocusMinutes:     25,
@@ -33,6 +28,8 @@ func Default() Config {
 		LongBreakMinutes: 15,
 		WindowX:          -1,
 		WindowY:          -1,
+		AutoStartBreaks:  true,
+		AutoStartFocus:   true,
 	}
 }
 
@@ -77,32 +74,47 @@ func Load() Config {
 		if !ok {
 			continue
 		}
-		n, err := strconv.Atoi(strings.TrimSpace(val))
-		if err != nil {
-			continue
-		}
-		switch strings.TrimSpace(key) {
+		key = strings.TrimSpace(key)
+		val = strings.TrimSpace(val)
+		atoi := func() (int, bool) { n, err := strconv.Atoi(val); return n, err == nil }
+		parseBool := func() (bool, bool) { b, err := strconv.ParseBool(val); return b, err == nil }
+		switch key {
 		case "focus_minutes":
-			cfg.FocusMinutes = n
+			if n, ok := atoi(); ok {
+				cfg.FocusMinutes = n
+			}
 		case "break_minutes":
-			cfg.BreakMinutes = n
+			if n, ok := atoi(); ok {
+				cfg.BreakMinutes = n
+			}
 		case "long_break_minutes":
-			cfg.LongBreakMinutes = n
+			if n, ok := atoi(); ok {
+				cfg.LongBreakMinutes = n
+			}
 		case "window_x":
-			cfg.WindowX = n
+			if n, ok := atoi(); ok {
+				cfg.WindowX = n
+			}
 		case "window_y":
-			cfg.WindowY = n
+			if n, ok := atoi(); ok {
+				cfg.WindowY = n
+			}
+		case "auto_start_breaks":
+			if b, ok := parseBool(); ok {
+				cfg.AutoStartBreaks = b
+			}
+		case "auto_start_focus":
+			if b, ok := parseBool(); ok {
+				cfg.AutoStartFocus = b
+			}
 		}
 	}
-	// A read error mid-file just means we keep whatever parsed so far; a
-	// partially-read config should never block startup.
-	_ = sc.Err()
+	_ = sc.Err() // keep whatever parsed; never block startup on a read error
 	return cfg.sanitised()
 }
 
-// Save writes the config, creating the parent directory as needed. Errors are
-// returned but callers may reasonably ignore them — a failed position save is
-// not worth interrupting a focus session.
+// Save writes the config, creating the parent directory as needed. Callers may
+// reasonably ignore the error — a failed save isn't worth interrupting a session.
 func (c Config) Save() error {
 	c = c.sanitised()
 	p := Path()
@@ -117,11 +129,14 @@ func (c Config) Save() error {
 	fmt.Fprintf(&b, "long_break_minutes = %d\n\n", c.LongBreakMinutes)
 	b.WriteString("# Overlay position; -1 means default (top-right).\n")
 	fmt.Fprintf(&b, "window_x = %d\n", c.WindowX)
-	fmt.Fprintf(&b, "window_y = %d\n", c.WindowY)
+	fmt.Fprintf(&b, "window_y = %d\n\n", c.WindowY)
+	b.WriteString("# Auto-start the next phase when the current one ends.\n")
+	fmt.Fprintf(&b, "auto_start_breaks = %t\n", c.AutoStartBreaks)
+	fmt.Fprintf(&b, "auto_start_focus = %t\n", c.AutoStartFocus)
 	return os.WriteFile(p, []byte(b.String()), 0o644)
 }
 
-// sanitised clamps durations to at least one minute so a corrupt or zero value
+// Sanitised clamps durations to at least one minute so a corrupt or zero value
 // can never produce a phase that is "over" the instant it starts.
 func (c Config) sanitised() Config {
 	if c.FocusMinutes < 1 {

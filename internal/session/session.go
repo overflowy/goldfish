@@ -1,14 +1,8 @@
-// Package session is the pure-Go core of Goldfish: the Cycle state machine. It
-// holds no Qt and knows nothing about rendering — the overlay polls it each tick
-// and draws whatever it reports. The defining rule (see docs/adr/0001) is that
-// phases never advance themselves: a phase runs past zero into Overtime forever
-// and only an explicit method call ends it.
 package session
 
 import "time"
 
-// Phase is which kind of stretch is currently running, or Idle for "nothing
-// running" (fresh launch, or after the cycle was stopped or a block abandoned).
+// Phase is the kind of stretch currently running, or Idle for nothing running.
 type Phase int
 
 const (
@@ -18,11 +12,8 @@ const (
 	LongBreak
 )
 
-// blocksPerLongBreak is the baked-in "4" of classic Pomodoro: a Long break is
-// earned after this many completed focus blocks. Deliberately not configurable.
 const blocksPerLongBreak = 4
 
-// Durations are the three tunable phase lengths, in real time.
 type Durations struct {
 	Focus     time.Duration
 	Break     time.Duration
@@ -41,31 +32,34 @@ type Session struct {
 	// Abandoned block does not increment it.
 	focusDone int
 
-	running bool          // a phase is active (Focus/Break/LongBreak)
-	paused  bool          // running but clock frozen
+	running bool
+	paused  bool
 	anchor  time.Time     // start of the current un-paused run segment
 	base    time.Duration // elapsed accumulated before the current segment
+
+	// autoStartBreaks gates focus→break, autoStartFocus gates break→focus. When
+	// the relevant one is off, the phase stops at 0:00 and waits for the user.
+	autoStartBreaks bool
+	autoStartFocus  bool
+	zeroChimed      bool // the time-up chime has fired for the current phase
 }
 
-// New returns an Idle session with the given durations.
 func New(d Durations) *Session {
-	return &Session{durations: d, phase: Idle}
+	return &Session{durations: d, phase: Idle, autoStartBreaks: true, autoStartFocus: true}
 }
 
-// SetDurations updates the phase lengths; takes effect on the next phase start.
 func (s *Session) SetDurations(d Durations) { s.durations = d }
 
-// --- queries the overlay renders from -------------------------------------
+func (s *Session) AutoStartBreaks() bool     { return s.autoStartBreaks }
+func (s *Session) SetAutoStartBreaks(v bool) { s.autoStartBreaks = v }
+func (s *Session) AutoStartFocus() bool      { return s.autoStartFocus }
+func (s *Session) SetAutoStartFocus(v bool)  { s.autoStartFocus = v }
 
-func (s *Session) Phase() Phase  { return s.phase }
-func (s *Session) Running() bool { return s.running }
-func (s *Session) Paused() bool  { return s.paused }
-
-// FocusDone is how many focus blocks are complete in the current cycle (0..4),
-// for rendering progress toward the Long break.
+func (s *Session) Phase() Phase   { return s.phase }
+func (s *Session) Running() bool  { return s.running }
+func (s *Session) Paused() bool   { return s.paused }
 func (s *Session) FocusDone() int { return s.focusDone }
 
-// nominal is the configured length of the current phase (0 when Idle).
 func (s *Session) nominal() time.Duration {
 	switch s.phase {
 	case Focus:
@@ -79,7 +73,6 @@ func (s *Session) nominal() time.Duration {
 	}
 }
 
-// Elapsed is how long the current phase has been running (frozen while paused).
 func (s *Session) Elapsed() time.Duration {
 	e := s.base
 	if s.running && !s.paused {
@@ -88,25 +81,52 @@ func (s *Session) Elapsed() time.Duration {
 	return e
 }
 
-// Remaining is signed time left in the phase: negative once in Overtime. When
-// Idle it reports the configured focus length, so the overlay can preview the
-// next block's duration on its "Start focus" anchor.
+// Remaining floors at zero. When Idle it reports the focus length so the overlay
+// can preview the next block's duration.
 func (s *Session) Remaining() time.Duration {
 	if s.phase == Idle {
 		return s.durations.Focus
 	}
-	return s.nominal() - s.Elapsed()
+	if r := s.nominal() - s.Elapsed(); r > 0 {
+		return r
+	}
+	return 0
 }
 
-// Overtime reports whether the current phase has run past its nominal length.
-// Stays true while paused, so the overtime visual state is stable.
-func (s *Session) Overtime() bool {
-	return s.phase != Idle && s.Remaining() < 0
+// Tick advances the cycle when the running phase reaches its length, and reports
+// whether the UI should chime. One hand-off per call (the next phase starts from
+// zero), so a long sleep doesn't cascade through phases. A gated phase chimes
+// once and waits.
+func (s *Session) Tick() bool {
+	if !s.running || s.paused || s.Elapsed() < s.nominal() {
+		return false
+	}
+	switch s.phase {
+	case Focus:
+		if s.autoStartBreaks {
+			s.TakeBreak()
+			return true
+		}
+		return s.gatedChime()
+	case Break, LongBreak:
+		if s.autoStartFocus {
+			s.StartNextFocus()
+			return true
+		}
+		return s.gatedChime()
+	default:
+		return false
+	}
 }
 
-// --- transitions (the only things that change phase) ----------------------
+func (s *Session) gatedChime() bool {
+	if !s.zeroChimed {
+		s.zeroChimed = true
+		return true
+	}
+	return false
+}
 
-// StartFocus begins a focus block from Idle. No-op if a phase is already running.
 func (s *Session) StartFocus() {
 	if s.phase != Idle {
 		return
@@ -114,9 +134,8 @@ func (s *Session) StartFocus() {
 	s.begin(Focus)
 }
 
-// TakeBreak ends the current focus block counting it as completed, and starts
-// the appropriate rest. This is the normal forward path out of focus, whether
-// taken in overtime or early ("skip to break") — either way the block counts.
+// TakeBreak ends the focus block counting it as completed and starts the
+// appropriate rest, whether taken early or on the auto hand-off at zero.
 func (s *Session) TakeBreak() {
 	if s.phase != Focus {
 		return
@@ -129,9 +148,8 @@ func (s *Session) TakeBreak() {
 	}
 }
 
-// Abandon ends the current focus block without counting it and returns to Idle.
-// The "I bailed" exit: focusDone is left untouched, so the voided block simply
-// did not happen.
+// Abandon ends the focus block without counting it (focusDone untouched) and
+// returns to Idle.
 func (s *Session) Abandon() {
 	if s.phase != Focus {
 		return
@@ -139,8 +157,8 @@ func (s *Session) Abandon() {
 	s.toIdle()
 }
 
-// StartNextFocus ends the current break and begins the next focus block. After a
-// Long break the cycle resets, so the next focus is block 1 of a fresh four.
+// StartNextFocus ends the current break and begins the next focus block; after a
+// Long break the cycle resets to block 1.
 func (s *Session) StartNextFocus() {
 	if s.phase != Break && s.phase != LongBreak {
 		return
@@ -151,15 +169,12 @@ func (s *Session) StartNextFocus() {
 	s.begin(Focus)
 }
 
-// Stop ends the whole cycle and returns to Idle, discarding progress toward the
-// Long break. Available from any running phase.
+// Stop ends the whole cycle, discarding progress toward the Long break.
 func (s *Session) Stop() {
 	s.focusDone = 0
 	s.toIdle()
 }
 
-// Pause freezes the running clock. Resume continues the same phase — a paused
-// block is still that block. No-op if not running or already paused/resumed.
 func (s *Session) Pause() {
 	if !s.running || s.paused {
 		return
@@ -176,14 +191,13 @@ func (s *Session) Resume() {
 	s.paused = false
 }
 
-// --- internal helpers ------------------------------------------------------
-
 func (s *Session) begin(p Phase) {
 	s.phase = p
 	s.base = 0
 	s.anchor = time.Now()
 	s.running = true
 	s.paused = false
+	s.zeroChimed = false
 }
 
 func (s *Session) toIdle() {

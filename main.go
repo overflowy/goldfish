@@ -1,6 +1,6 @@
 // Goldfish is a macOS focus aid: a Pomodoro-style overlay that floats over other
-// apps so the current time-box and intention stay in view. It runs as a menu-bar
-// agent (no dock icon) whose single window is the always-present overlay.
+// apps so the current time-box stays in view. It runs as a menu-bar agent (no
+// dock icon) whose single window is the always-present overlay.
 package main
 
 import (
@@ -16,12 +16,12 @@ import (
 
 func main() {
 	qt6.NewQApplication(os.Args)
-	// The overlay is the only window; it must never be the reason the app quits,
-	// and hiding it must not end the process. Quit is via the menu-bar item.
 	qt6.QGuiApplication_SetQuitOnLastWindowClosed(false)
 
 	cfg := config.Load()
 	sess := session.New(durationsFromConfig(cfg))
+	sess.SetAutoStartBreaks(cfg.AutoStartBreaks)
+	sess.SetAutoStartFocus(cfg.AutoStartFocus)
 
 	overlay := ui.NewOverlay(sess, func(x, y int) {
 		cfg.WindowX, cfg.WindowY = x, y
@@ -29,16 +29,18 @@ func main() {
 	})
 	overlay.Show(cfg.WindowX, cfg.WindowY)
 
-	// The menu-bar item is the primary control surface; it repaints the overlay
-	// immediately after any action.
-	tray := ui.NewTray(sess, overlay.Refresh)
+	tray := ui.NewTray(sess, overlay.Refresh, func() {
+		cfg.AutoStartBreaks = sess.AutoStartBreaks()
+		cfg.AutoStartFocus = sess.AutoStartFocus()
+		_ = cfg.Save()
+	})
+	overlay.OnContextMenu(tray.PopupMenu)
 
-	// Poll the session a few times a second so the countdown, overtime flip,
-	// one-shot chime, and menu enabled-states stay live without the session
-	// having to push events.
+	// Poll a few times a second so the countdown, the auto-advance at zero, and
+	// the menu states stay live without the session pushing events.
 	ticker := qt6.NewQTimer()
 	ticker.OnTimeout(func() {
-		overlay.Refresh()
+		overlay.Tick()
 		tray.Sync()
 	})
 	ticker.Start(250)

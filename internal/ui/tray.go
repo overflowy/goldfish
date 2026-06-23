@@ -6,34 +6,38 @@ import (
 	"github.com/mappu/miqt/qt6"
 )
 
-// Tray is the menu-bar item and the app's primary control surface: Start focus,
-// Take a break, Pause/Resume, and Abandon, each enabled only when it applies to
-// the current phase. Sync must be called whenever the session may have changed
-// so the items reflect reality.
 type Tray struct {
 	icon    *qt6.QSystemTrayIcon
 	session *session.Session
+	menu    *qt6.QMenu
 
-	startAct   *qt6.QAction
-	breakAct   *qt6.QAction
-	pauseAct   *qt6.QAction
-	abandonAct *qt6.QAction
+	startAct     *qt6.QAction
+	breakAct     *qt6.QAction
+	pauseAct     *qt6.QAction
+	abandonAct   *qt6.QAction
+	resetAct     *qt6.QAction
+	autoBreakAct *qt6.QAction
+	autoFocusAct *qt6.QAction
 
-	onChange func() // redraw the overlay after an action
+	iconColor string
+
+	onChange   func() // redraw the overlay after an action
+	onSettings func() // persist the auto-start toggles
 }
 
-// NewTray builds the menu-bar item. onChange is invoked after any action so the
-// overlay can repaint immediately rather than waiting for the next poll.
-func NewTray(s *session.Session, onChange func()) *Tray {
+func NewTray(s *session.Session, onChange func(), onSettings func()) *Tray {
 	t := &Tray{
-		icon:     qt6.NewQSystemTrayIcon(),
-		session:  s,
-		onChange: onChange,
+		icon:       qt6.NewQSystemTrayIcon(),
+		session:    s,
+		onChange:   onChange,
+		onSettings: onSettings,
 	}
-	t.icon.SetIcon(trayIcon())
+	t.iconColor = trayColor(s.Phase())
+	t.icon.SetIcon(trayIcon(t.iconColor))
 	t.icon.SetToolTip("Goldfish")
 
 	menu := qt6.NewQMenu2()
+	t.menu = menu
 
 	t.startAct = qt6.NewQAction2("Start focus")
 	t.startAct.OnTriggered(func() { t.do(t.startFocus) })
@@ -51,6 +55,14 @@ func NewTray(s *session.Session, onChange func()) *Tray {
 	t.abandonAct.OnTriggered(func() { t.do(s.Abandon) })
 	menu.QWidget.AddAction(t.abandonAct)
 
+	t.resetAct = qt6.NewQAction2("Reset")
+	t.resetAct.OnTriggered(func() { t.do(s.Stop) })
+	menu.QWidget.AddAction(t.resetAct)
+
+	menu.AddSeparator()
+	t.autoBreakAct = t.addCheckable(menu, "Auto-start breaks", s.AutoStartBreaks, s.SetAutoStartBreaks)
+	t.autoFocusAct = t.addCheckable(menu, "Auto-start focus", s.AutoStartFocus, s.SetAutoStartFocus)
+
 	menu.AddSeparator()
 	quit := qt6.NewQAction2("Quit Goldfish")
 	quit.OnTriggered(qt6.QCoreApplication_Quit)
@@ -62,7 +74,27 @@ func NewTray(s *session.Session, onChange func()) *Tray {
 	return t
 }
 
-// do runs a transition then refreshes both the menu and the overlay.
+func (t *Tray) addCheckable(menu *qt6.QMenu, label string, get func() bool, set func(bool)) *qt6.QAction {
+	act := qt6.NewQAction2(label)
+	act.SetCheckable(true)
+	act.SetChecked(get())
+	act.OnTriggered(func() {
+		set(act.IsChecked())
+		if t.onSettings != nil {
+			t.onSettings()
+		}
+	})
+	menu.QWidget.AddAction(act)
+	return act
+}
+
+// PopupMenu raises the same menu at a global point (the overlay's right-click),
+// syncing its state first.
+func (t *Tray) PopupMenu(pos *qt6.QPoint) {
+	t.Sync()
+	t.menu.Popup(pos)
+}
+
 func (t *Tray) do(action func()) {
 	action()
 	t.Sync()
@@ -71,8 +103,7 @@ func (t *Tray) do(action func()) {
 	}
 }
 
-// startFocus is "Start focus" across phases: begin from Idle, or advance out of a
-// break into the next focus block.
+// startFocus begins from Idle or advances out of a break into the next focus.
 func (t *Tray) startFocus() {
 	switch t.session.Phase() {
 	case session.Idle:
@@ -90,28 +121,36 @@ func (t *Tray) pauseResume() {
 	}
 }
 
-// Sync updates each item's enabled state and label to match the current phase.
 func (t *Tray) Sync() {
 	phase := t.session.Phase()
 	focusing := phase == session.Focus
 
-	// Start focus applies whenever we're not already focusing (Idle, or in a
-	// break ready to advance).
 	t.startAct.SetEnabled(!focusing)
-	// Take a break and Abandon only make sense during a focus block.
 	t.breakAct.SetEnabled(focusing)
 	t.abandonAct.SetEnabled(focusing)
-	// Pause toggles to Resume; available whenever a phase is running.
+	t.resetAct.SetEnabled(t.session.Running())
 	t.pauseAct.SetEnabled(t.session.Running())
 	if t.session.Paused() {
 		t.pauseAct.SetText("Resume")
 	} else {
 		t.pauseAct.SetText("Pause")
 	}
+	t.autoBreakAct.SetChecked(t.session.AutoStartBreaks())
+	t.autoFocusAct.SetChecked(t.session.AutoStartFocus())
+
+	if c := trayColor(phase); c != t.iconColor {
+		t.iconColor = c
+		t.icon.SetIcon(trayIcon(c))
+	}
 }
 
-// trayIcon paints a small filled dot at runtime so Goldfish ships no image asset.
-func trayIcon() *qt6.QIcon {
+// trayColor is the phase's body colour, lightened to read against the menu bar.
+func trayColor(p session.Phase) string {
+	return lighten(cardColor(p), trayLighten)
+}
+
+// trayIcon paints a small filled dot so Goldfish ships no image asset.
+func trayIcon(color string) *qt6.QIcon {
 	pm := qt6.NewQPixmap2(22, 22)
 	pm.FillWithFillColor(qt6.NewQColor6("transparent"))
 
@@ -119,7 +158,7 @@ func trayIcon() *qt6.QIcon {
 	p.Begin(pm.QPaintDevice)
 	p.SetRenderHint(qt6.QPainter__Antialiasing)
 	p.SetPen(qt6.NewQColor6("transparent"))
-	p.SetBrush(qt6.NewQBrush3(qt6.NewQColor6("#f5a623")))
+	p.SetBrush(qt6.NewQBrush3(qt6.NewQColor6(color)))
 	p.DrawEllipse2(3, 3, 16, 16)
 	p.End()
 
