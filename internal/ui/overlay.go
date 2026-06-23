@@ -63,10 +63,12 @@ func NewOverlay(s *session.Session, onMove func(x, y int)) *Overlay {
 	// vanish the moment the user clicks into another app.
 	o.root.SetWindowFlags(qt6.FramelessWindowHint | qt6.WindowStaysOnTopHint | qt6.CustomizeWindowHint)
 	o.root.SetAttribute2(qt6.WA_TranslucentBackground, true)
+	o.root.SetFocusPolicy(qt6.StrongFocus) // accept keys when clicked (spacebar)
 	o.root.SetFixedWidth(cardWidth)
 	o.installPaint()
 	o.installContextMenu()
 	o.installActivation()
+	o.installKeys()
 
 	col := qt6.NewQVBoxLayout(o.root)
 	col.SetContentsMargins(14, 12, 14, 12)
@@ -131,6 +133,31 @@ func (o *Overlay) applyOpacity() {
 		o.root.SetWindowOpacity(opacityActive)
 	} else {
 		o.root.SetWindowOpacity(opacityInactive)
+	}
+}
+
+// installKeys makes spacebar a play/pause toggle while the overlay is focused.
+func (o *Overlay) installKeys() {
+	o.root.OnKeyPressEvent(func(super func(e *qt6.QKeyEvent), e *qt6.QKeyEvent) {
+		if e.Key() == int(qt6.Key_Space) {
+			o.toggleRun()
+			o.Refresh()
+			return
+		}
+		super(e)
+	})
+}
+
+// toggleRun starts focus from Idle, resumes a paused phase, or pauses a running
+// one — the spacebar action, valid in every phase.
+func (o *Overlay) toggleRun() {
+	switch {
+	case o.session.Phase() == session.Idle:
+		o.session.StartFocus()
+	case o.session.Paused():
+		o.session.Resume()
+	default:
+		o.session.Pause()
 	}
 }
 

@@ -47,7 +47,8 @@ click the menu-bar dot, or right-click the overlay itself:
 | Reset | end the whole cycle |
 | Auto-start breaks / focus | toggle the automatic hand-offs |
 
-Drag the overlay anywhere; it remembers where you put it.
+Click the overlay and press **spacebar** to start / pause from any phase. Drag
+it anywhere; it remembers where you put it.
 
 ## Configuration
 
