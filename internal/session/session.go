@@ -60,6 +60,16 @@ func (s *Session) Running() bool  { return s.running }
 func (s *Session) Paused() bool   { return s.paused }
 func (s *Session) FocusDone() int { return s.focusDone }
 
+// Capability predicates report which intents are valid in the current state. The
+// tray reads them to enable/disable its menu items; the spacebar intent
+// (ToggleRun) is always callable and needs none. They are pure functions of the
+// state machine, so a UI never has to re-derive the transition rules.
+func (s *Session) CanStartFocus() bool  { return s.phase != Focus }
+func (s *Session) CanTakeBreak() bool   { return s.phase == Focus }
+func (s *Session) CanAbandon() bool     { return s.phase == Focus }
+func (s *Session) CanReset() bool       { return s.running }
+func (s *Session) CanPauseResume() bool { return s.running }
+
 func (s *Session) nominal() time.Duration {
 	switch s.phase {
 	case Focus:
@@ -110,7 +120,7 @@ func (s *Session) Tick() bool {
 		return s.gatedChime()
 	case Break, LongBreak:
 		if s.autoStartFocus {
-			s.StartNextFocus()
+			s.StartFocus()
 			return true
 		}
 		return s.gatedChime()
@@ -127,11 +137,34 @@ func (s *Session) gatedChime() bool {
 	return false
 }
 
+// StartFocus enters the next focus block whatever the current phase: it begins
+// the first block from Idle, or ends the current break and starts the next.
+// Leaving a Long break resets the cycle to block 1. A no-op while already
+// focusing — the only phase from which "start focus" means nothing.
 func (s *Session) StartFocus() {
-	if s.phase != Idle {
-		return
+	switch s.phase {
+	case Idle:
+		s.begin(Focus)
+	case Break, LongBreak:
+		if s.phase == LongBreak {
+			s.focusDone = 0
+		}
+		s.begin(Focus)
 	}
-	s.begin(Focus)
+}
+
+// ToggleRun is the spacebar / Pause-item intent: start the first focus block
+// from Idle, resume when paused, or pause an otherwise-running phase. Valid in
+// every phase, so it carries no capability predicate.
+func (s *Session) ToggleRun() {
+	switch {
+	case s.phase == Idle:
+		s.StartFocus()
+	case s.paused:
+		s.Resume()
+	default:
+		s.Pause()
+	}
 }
 
 // TakeBreak ends the focus block counting it as completed and starts the
@@ -155,18 +188,6 @@ func (s *Session) Abandon() {
 		return
 	}
 	s.toIdle()
-}
-
-// StartNextFocus ends the current break and begins the next focus block; after a
-// Long break the cycle resets to block 1.
-func (s *Session) StartNextFocus() {
-	if s.phase != Break && s.phase != LongBreak {
-		return
-	}
-	if s.phase == LongBreak {
-		s.focusDone = 0
-	}
-	s.begin(Focus)
 }
 
 // Stop ends the whole cycle, discarding progress toward the Long break.

@@ -140,25 +140,12 @@ func (o *Overlay) applyOpacity() {
 func (o *Overlay) installKeys() {
 	o.root.OnKeyPressEvent(func(super func(e *qt6.QKeyEvent), e *qt6.QKeyEvent) {
 		if e.Key() == int(qt6.Key_Space) {
-			o.toggleRun()
+			o.session.ToggleRun()
 			o.Refresh()
 			return
 		}
 		super(e)
 	})
-}
-
-// toggleRun starts focus from Idle, resumes a paused phase, or pauses a running
-// one — the spacebar action, valid in every phase.
-func (o *Overlay) toggleRun() {
-	switch {
-	case o.session.Phase() == session.Idle:
-		o.session.StartFocus()
-	case o.session.Paused():
-		o.session.Resume()
-	default:
-		o.session.Pause()
-	}
 }
 
 func (o *Overlay) Refresh() {

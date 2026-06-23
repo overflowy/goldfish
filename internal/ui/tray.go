@@ -40,7 +40,7 @@ func NewTray(s *session.Session, onChange func(), onSettings func()) *Tray {
 	t.menu = menu
 
 	t.startAct = qt6.NewQAction2("Start focus")
-	t.startAct.OnTriggered(func() { t.do(t.startFocus) })
+	t.startAct.OnTriggered(func() { t.do(s.StartFocus) })
 	menu.QWidget.AddAction(t.startAct)
 
 	t.breakAct = qt6.NewQAction2("Take a break")
@@ -48,7 +48,7 @@ func NewTray(s *session.Session, onChange func(), onSettings func()) *Tray {
 	menu.QWidget.AddAction(t.breakAct)
 
 	t.pauseAct = qt6.NewQAction2("Pause")
-	t.pauseAct.OnTriggered(func() { t.do(t.pauseResume) })
+	t.pauseAct.OnTriggered(func() { t.do(s.ToggleRun) })
 	menu.QWidget.AddAction(t.pauseAct)
 
 	t.abandonAct = qt6.NewQAction2("Abandon")
@@ -103,42 +103,25 @@ func (t *Tray) do(action func()) {
 	}
 }
 
-// startFocus begins from Idle or advances out of a break into the next focus.
-func (t *Tray) startFocus() {
-	switch t.session.Phase() {
-	case session.Idle:
-		t.session.StartFocus()
-	case session.Break, session.LongBreak:
-		t.session.StartNextFocus()
-	}
-}
-
-func (t *Tray) pauseResume() {
-	if t.session.Paused() {
-		t.session.Resume()
-	} else {
-		t.session.Pause()
-	}
-}
-
 func (t *Tray) Sync() {
-	phase := t.session.Phase()
-	focusing := phase == session.Focus
+	s := t.session
 
-	t.startAct.SetEnabled(!focusing)
-	t.breakAct.SetEnabled(focusing)
-	t.abandonAct.SetEnabled(focusing)
-	t.resetAct.SetEnabled(t.session.Running())
-	t.pauseAct.SetEnabled(t.session.Running())
-	if t.session.Paused() {
+	// Enable each item straight from the session's capability predicates rather
+	// than re-deriving the transition rules here.
+	t.startAct.SetEnabled(s.CanStartFocus())
+	t.breakAct.SetEnabled(s.CanTakeBreak())
+	t.abandonAct.SetEnabled(s.CanAbandon())
+	t.resetAct.SetEnabled(s.CanReset())
+	t.pauseAct.SetEnabled(s.CanPauseResume())
+	if s.Paused() {
 		t.pauseAct.SetText("Resume")
 	} else {
 		t.pauseAct.SetText("Pause")
 	}
-	t.autoBreakAct.SetChecked(t.session.AutoStartBreaks())
-	t.autoFocusAct.SetChecked(t.session.AutoStartFocus())
+	t.autoBreakAct.SetChecked(s.AutoStartBreaks())
+	t.autoFocusAct.SetChecked(s.AutoStartFocus())
 
-	if c := trayColor(phase); c != t.iconColor {
+	if c := trayColor(s.Phase()); c != t.iconColor {
 		t.iconColor = c
 		t.icon.SetIcon(trayIcon(c))
 	}

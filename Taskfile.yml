@@ -43,6 +43,13 @@ tasks:
       - go vet ./...
       - gofmt -w .
 
+  test:
+    desc: Run the Go tests
+    env:
+      CGO_CXXFLAGS: -std=c++17
+    cmds:
+      - go test ./...
+
   build:
     desc: Build the miqt binary into dist/
     env:
